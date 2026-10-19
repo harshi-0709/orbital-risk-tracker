@@ -94,6 +94,17 @@ def launches_by_year(site_code: str = None):
         FROM Launch WHERE (%s IS NULL OR site_code = %s)
         GROUP BY yr ORDER BY yr""", (site_code, site_code))
 
+@app.get("/api/objects-by-year")
+def objects_by_year():
+    # objects put into orbit per launch year + running total (window function)
+    return run_query("""
+        SELECT yr, objects, SUM(objects) OVER (ORDER BY yr) AS cumulative
+        FROM (SELECT YEAR(l.launch_date) AS yr, COUNT(*) AS objects
+              FROM SpaceObject s JOIN Launch l ON l.launch_id = s.launch_id
+              WHERE l.launch_date IS NOT NULL
+              GROUP BY YEAR(l.launch_date)) t
+        ORDER BY yr""")
+
 @app.get("/api/owners")
 def owners(limit: int = 15):
     return run_query("""
@@ -119,6 +130,19 @@ def alerts(status: str = None, severity: str = None, zone_id: int = None,
         JOIN SpaceObject p ON p.object_id = pa.primary_object_id
         JOIN SpaceObject s ON s.object_id = pa.secondary_object_id
         {clause} ORDER BY pa.tca LIMIT %s""", (*params, limit))
+
+# ---------- alert graphs for the Overview page (3 small aggregate queries, one response) ----------
+@app.get("/api/alerts/overview")
+def alerts_overview():
+    by_severity = run_query("""
+        SELECT severity, COUNT(*) AS n FROM ProximityAlert GROUP BY severity""")
+    by_status = run_query("""
+        SELECT status, COUNT(*) AS n FROM ProximityAlert GROUP BY status""")
+    open_by_zone = run_query("""
+        SELECT zone_id, severity, COUNT(*) AS n
+        FROM ProximityAlert WHERE status = 'OPEN' GROUP BY zone_id, severity""")
+    return {"by_severity": by_severity, "by_status": by_status,
+            "open_by_zone": open_by_zone}
 
 @app.get("/api/alerts/{alert_id}/history")
 def alert_history(alert_id: int):
